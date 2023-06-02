@@ -1,0 +1,67 @@
+trigger:
+  branches:
+    include:
+      - main
+   
+pool:
+  vmImage: 'ubuntu-latest'
+   
+variables:
+  imageName: 'yashmed-app'
+  imageTag: ''
+  imageRepository: 'yashwanthcr7/yashmed-app'
+
+stages:
+- stage: Build
+  displayName: Build image
+  jobs:  
+  - job: Build
+    displayName: Build and push Docker image 
+    steps:
+    - script: |
+        echo "##vso[task.setvariable variable=imageTag]$(date +%d%m%Y)"
+      displayName: 'Set Image Tag'
+
+    - task: Docker@2
+      displayName: Build Docker Image
+      inputs:
+        command: build
+        Dockerfile: '$(Build.SourcesDirectory)/Dockerfile'
+        containerRegistry: 'docker deploy'
+        repository: '$(imageRepository)'
+        tags: |
+          $(imageTag)
+
+    - task: Docker@2
+      displayName: Push Docker Image
+      inputs:
+        containerRegistry: 'docker deploy'  # Docker Hub service connection in Azure DevOps
+        repository: '$(imageRepository)'
+        command: push
+        tags: |
+          $(imageTag)
+
+- stage: Deploy
+  displayName: Deploy to VM
+  jobs:  
+  - job: Deploy
+    displayName: Deploy to VM  
+    steps:
+    - checkout: self
+    - task: CopyFilesOverSSH@0
+      displayName: 'Copy Dockerfile to remote machine'
+      inputs:
+        sshEndpoint: 'newline'
+        sourceFolder: '$(Build.SourcesDirectory)'
+        contents: 'docker-compose.yaml'
+        targetFolder: '/home/ubuntu'
+
+    - task: SSH@0
+      displayName: 'Deploy to EC2'
+      inputs:
+        sshEndpoint: 'newline'
+        runOptions: 'commands'
+        commands: |
+          cd /home/ubuntu
+          sudo docker-compose -f docker-compose.yaml up -d
+        failOnStdErr: false
